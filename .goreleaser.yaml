@@ -25,7 +25,7 @@ builds:
         goarch: arm64
     ldflags:
       - -s -w
-      - -X github.com/clairitydev/cora-cli/cmd.Version={{.Version}}
+      - -X github.com/clairitydev/cora/cmd.Version={{.Version}}
 
 archives:
   - id: default

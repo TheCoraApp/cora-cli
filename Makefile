@@ -1,8 +1,11 @@
 .PHONY: build clean test install
 
 # Build variables
-VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
-LDFLAGS := -ldflags "-X github.com/clairitydev/cora-cli/cmd.Version=$(VERSION)"
+# Use the latest git tag if available, otherwise use 0.0.0-dev
+# Strip the 'v' prefix from tags (v0.1.0 -> 0.1.0)
+GIT_TAG := $(shell git describe --tags --abbrev=0 2>/dev/null)
+VERSION ?= $(if $(GIT_TAG),$(shell echo $(GIT_TAG) | sed 's/^v//'),0.0.0-dev)
+LDFLAGS := -ldflags "-X github.com/clairitydev/cora/cmd.Version=$(VERSION)"
 BINARY := cora
 
 # Default target

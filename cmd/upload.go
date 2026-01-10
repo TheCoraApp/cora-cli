@@ -45,7 +45,7 @@ func init() {
 	rootCmd.AddCommand(uploadCmd)
 	uploadCmd.Flags().StringVarP(&workspace, "workspace", "w", "", "Target workspace name (required)")
 	uploadCmd.Flags().StringVarP(&stateFile, "file", "f", "", "Path to Terraform state file (reads from stdin if not provided)")
-	uploadCmd.MarkFlagRequired("workspace")
+	_ = uploadCmd.MarkFlagRequired("workspace")
 }
 
 func runUpload(cmd *cobra.Command, args []string) error {

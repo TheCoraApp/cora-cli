@@ -1,4 +1,4 @@
-module github.com/clairitydev/cora-cli
+module github.com/clairitydev/cora
 
 go 1.22
 

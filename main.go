@@ -3,7 +3,7 @@ package main
 import (
 	"os"
 
-	"github.com/clairitydev/cora-cli/cmd"
+	"github.com/clairitydev/cora/cmd"
 )
 
 func main() {
