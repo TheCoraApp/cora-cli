@@ -1,0 +1,111 @@
+# yaml-language-server: $schema=https://goreleaser.com/static/schema.json
+version: 2
+
+project_name: cora
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: cora
+    main: .
+    binary: cora
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - darwin
+      - linux
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    ignore:
+      - goos: windows
+        goarch: arm64
+    ldflags:
+      - -s -w
+      - -X github.com/clairitydev/cora-cli/cmd.Version={{.Version}}
+
+archives:
+  - id: default
+    format: tar.gz
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    format_overrides:
+      - goos: windows
+        format: zip
+    files:
+      - README.md
+      - LICENSE
+
+checksum:
+  name_template: "checksums.txt"
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^chore:"
+  groups:
+    - title: Features
+      regexp: "^.*feat[(\\w)]*:+.*$"
+      order: 0
+    - title: Bug Fixes
+      regexp: "^.*fix[(\\w)]*:+.*$"
+      order: 1
+    - title: Others
+      order: 999
+
+release:
+  github:
+    owner: clairitydev
+    name: cora-cli
+  draft: false
+  prerelease: auto
+  footer: |
+    ## Installation
+
+    ### Download Binary
+
+    Download the appropriate archive for your platform from the assets below, extract it, and move the `cora` binary to a directory in your PATH.
+
+    **macOS (Apple Silicon):**
+    ```bash
+    curl -L https://github.com/clairitydev/cora-cli/releases/download/{{ .Tag }}/cora_{{ .Version }}_darwin_arm64.tar.gz | tar xz
+    sudo mv cora /usr/local/bin/
+    ```
+
+    **macOS (Intel):**
+    ```bash
+    curl -L https://github.com/clairitydev/cora-cli/releases/download/{{ .Tag }}/cora_{{ .Version }}_darwin_amd64.tar.gz | tar xz
+    sudo mv cora /usr/local/bin/
+    ```
+
+    **Linux (amd64):**
+    ```bash
+    curl -L https://github.com/clairitydev/cora-cli/releases/download/{{ .Tag }}/cora_{{ .Version }}_linux_amd64.tar.gz | tar xz
+    sudo mv cora /usr/local/bin/
+    ```
+
+    **Linux (arm64):**
+    ```bash
+    curl -L https://github.com/clairitydev/cora-cli/releases/download/{{ .Tag }}/cora_{{ .Version }}_linux_arm64.tar.gz | tar xz
+    sudo mv cora /usr/local/bin/
+    ```
+
+    **Windows (amd64):**
+    Download `cora_{{ .Version }}_windows_amd64.zip`, extract, and add to your PATH.
+
+    ## Quick Start
+
+    ```bash
+    # Configure your API token
+    cora configure --token YOUR_API_TOKEN
+
+    # Upload Terraform state
+    terraform show -json | cora upload --workspace my-app-prod
+    ```
+
+    See the [README](https://github.com/clairitydev/cora-cli#readme) for full documentation.
