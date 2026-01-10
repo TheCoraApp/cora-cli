@@ -59,9 +59,8 @@ changelog:
       order: 999
 
 release:
-  github:
-    owner: clairitydev
-    name: cora-cli
+  # GoReleaser will automatically detect the repo from GITHUB_REPOSITORY env var
+  # when running in GitHub Actions, so we don't hardcode owner/name here
   draft: false
   prerelease: auto
   footer: |
