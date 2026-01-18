@@ -7,7 +7,6 @@ import (
 	"io"
 	"net/http"
 	"os"
-	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -58,6 +57,18 @@ func runUpload(cmd *cobra.Command, args []string) error {
 	// Get API URL
 	apiBaseURL := getAPIURL()
 
+	// Fetch service discovery to get endpoints
+	discovery, err := FetchServiceDiscovery(apiBaseURL)
+	if err != nil {
+		// Non-fatal: continue with defaults
+		fmt.Fprintf(os.Stderr, "Warning: Could not fetch service discovery: %v\n", err)
+	}
+
+	// Check CLI version against server requirements
+	if discovery != nil {
+		checkCLIVersionFromDiscovery(discovery)
+	}
+
 	// Read state from file or stdin
 	var stateData []byte
 	if stateFile != "" {
@@ -96,8 +107,12 @@ func runUpload(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("invalid Terraform state: missing 'resources' field")
 	}
 
-	// Upload to Cora
-	uploadURL := fmt.Sprintf("%s/api/terraform-state?workspace=%s", strings.TrimSuffix(apiBaseURL, "/"), workspace)
+	// Build upload URL using discovered endpoint
+	stateEndpoint := discovery.Endpoints.StateUpload
+	if stateEndpoint == "" {
+		stateEndpoint = "/api/terraform-state"
+	}
+	uploadURL := fmt.Sprintf("%s?workspace=%s", GetEndpointURL(apiBaseURL, stateEndpoint), workspace)
 
 	client := &http.Client{
 		Timeout: 60 * time.Second,

@@ -94,6 +94,54 @@ terraform show -json | cora upload --workspace my-app-prod --token YOUR_TOKEN
 | `--token` | | API token (overrides CORA_TOKEN env var and stored config) |
 | `--api-url` | | API URL (default: https://thecora.app) |
 
+### Review Command
+
+The `review` command uploads Terraform plan JSON for PR risk assessment. This is useful for analyzing infrastructure changes before they are applied.
+
+```bash
+# Pipe from terraform show (with a plan file)
+terraform show -json tfplan | cora review --workspace my-app-prod
+
+# Read from a file
+cora review --workspace my-app-prod --file plan.json
+
+# With GitHub PR context (enables automatic PR comments)
+terraform show -json tfplan | cora review \
+  --workspace my-app-prod \
+  --github-owner myorg \
+  --github-repo myrepo \
+  --pr-number 123 \
+  --commit-sha abc123
+```
+
+**Flags:**
+| Flag | Short | Description |
+|------|-------|-------------|
+| `--workspace` | `-w` | Target workspace name (required) |
+| `--file` | `-f` | Path to Terraform plan JSON file (reads from stdin if not provided) |
+| `--source` | | Source identifier (e.g., 'atlantis', 'github-actions', 'cli') |
+| `--github-owner` | | GitHub repository owner (for PR comments) |
+| `--github-repo` | | GitHub repository name (for PR comments) |
+| `--pr-number` | | GitHub PR number (for PR comments) |
+| `--commit-sha` | | Git commit SHA (for PR comments) |
+| `--token` | | API token (overrides CORA_TOKEN env var and stored config) |
+| `--api-url` | | API URL (default: https://thecora.app) |
+
+**Output:**
+```
+✅ Plan analyzed successfully
+   Plan ID: abc123-def456
+
+📊 Risk Assessment
+   Level: 🟡 Medium
+   Score: 45.0
+   Rules triggered: 3
+
+🔗 View details: https://thecora.app/pr-reviews/abc123-def456
+
+💬 GitHub comment posted: https://github.com/myorg/myrepo/pull/123#issuecomment-12345
+```
+
 ### Configure Command
 
 The `configure` command stores your API token locally for future use.
@@ -271,6 +319,17 @@ Your token may be expired or revoked. Create a new token at [https://thecora.app
 
 The CLI expects valid Terraform state JSON. Make sure you're using `terraform show -json` (not just `terraform show`).
 
+### "Invalid Terraform plan"
+
+For the `review` command, make sure you're providing a plan file, not state:
+```bash
+# First, create a plan
+terraform plan -out=tfplan
+
+# Then, show the plan as JSON
+terraform show -json tfplan | cora review --workspace my-app
+```
+
 ### Large State Files
 
 For very large state files, the upload may take a few seconds. The CLI has a 60-second timeout by default. If you're experiencing timeouts, check your network connection.
@@ -282,6 +341,17 @@ If you see this error, your CLI version is too old and no longer supported. Down
 ### Upgrade Warnings
 
 The CLI will display a warning if a newer version is available. These warnings don't block uploads but indicate you should upgrade soon for the best experience and latest features.
+
+## Service Discovery
+
+The Cora CLI uses service discovery to dynamically fetch API endpoints from the server. On first request, the CLI fetches `/.well-known/cora.json` from the API URL and caches the endpoint configuration for 1 hour.
+
+This allows the server to:
+- Version API endpoints without breaking older CLIs
+- Provide version requirements and upgrade guidance
+- Enable or disable features dynamically
+
+If service discovery fails (e.g., for older server versions), the CLI falls back to default endpoints.
 
 ## Security
 
