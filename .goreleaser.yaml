@@ -30,7 +30,7 @@ builds:
 archives:
   - id: default
     format: tar.gz
-    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    name_template: "{{ .ProjectName }}_{{ .Tag }}_{{ .Os }}_{{ .Arch }}"
     format_overrides:
       - goos: windows
         format: zip
@@ -72,30 +72,30 @@ release:
 
     **macOS (Apple Silicon):**
     ```bash
-    curl -L https://github.com/clairitydev/cora-cli/releases/download/{{ .Tag }}/cora_{{ .Version }}_darwin_arm64.tar.gz | tar xz
+    curl -L https://github.com/clairitydev/cora-cli/releases/download/{{ .Tag }}/cora_{{ .Tag }}_darwin_arm64.tar.gz | tar xz
     sudo mv cora /usr/local/bin/
     ```
 
     **macOS (Intel):**
     ```bash
-    curl -L https://github.com/clairitydev/cora-cli/releases/download/{{ .Tag }}/cora_{{ .Version }}_darwin_amd64.tar.gz | tar xz
+    curl -L https://github.com/clairitydev/cora-cli/releases/download/{{ .Tag }}/cora_{{ .Tag }}_darwin_amd64.tar.gz | tar xz
     sudo mv cora /usr/local/bin/
     ```
 
     **Linux (amd64):**
     ```bash
-    curl -L https://github.com/clairitydev/cora-cli/releases/download/{{ .Tag }}/cora_{{ .Version }}_linux_amd64.tar.gz | tar xz
+    curl -L https://github.com/clairitydev/cora-cli/releases/download/{{ .Tag }}/cora_{{ .Tag }}_linux_amd64.tar.gz | tar xz
     sudo mv cora /usr/local/bin/
     ```
 
     **Linux (arm64):**
     ```bash
-    curl -L https://github.com/clairitydev/cora-cli/releases/download/{{ .Tag }}/cora_{{ .Version }}_linux_arm64.tar.gz | tar xz
+    curl -L https://github.com/clairitydev/cora-cli/releases/download/{{ .Tag }}/cora_{{ .Tag }}_linux_arm64.tar.gz | tar xz
     sudo mv cora /usr/local/bin/
     ```
 
     **Windows (amd64):**
-    Download `cora_{{ .Version }}_windows_amd64.zip`, extract, and add to your PATH.
+    Download `cora_{{ .Tag }}_windows_amd64.zip`, extract, and add to your PATH.
 
     ## Quick Start
 
