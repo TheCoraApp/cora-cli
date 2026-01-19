@@ -9,6 +9,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/clairitydev/cora/internal/filter"
 	"github.com/spf13/cobra"
 )
 
@@ -36,14 +37,20 @@ Environment Variables:
 }
 
 var (
-	workspace string
-	stateFile string
+	workspace    string
+	stateFile    string
+	noFilter     bool
+	filterDryRun bool
+	outputFormat string
 )
 
 func init() {
 	rootCmd.AddCommand(uploadCmd)
 	uploadCmd.Flags().StringVarP(&workspace, "workspace", "w", "", "Target workspace name (required)")
 	uploadCmd.Flags().StringVarP(&stateFile, "file", "f", "", "Path to Terraform state file (reads from stdin if not provided)")
+	uploadCmd.Flags().BoolVar(&noFilter, "no-filter", false, "Disable sensitive data filtering")
+	uploadCmd.Flags().BoolVar(&filterDryRun, "filter-dry-run", false, "Show what would be filtered without uploading")
+	uploadCmd.Flags().StringVar(&outputFormat, "output-format", "text", "Output format for dry-run: text or json")
 	_ = uploadCmd.MarkFlagRequired("workspace")
 }
 
@@ -57,8 +64,8 @@ func runUpload(cmd *cobra.Command, args []string) error {
 	// Get API URL
 	apiBaseURL := getAPIURL()
 
-	// Fetch service discovery to get endpoints
-	discovery, err := FetchServiceDiscovery(apiBaseURL)
+	// Fetch service discovery to get endpoints (pass token for account-specific settings)
+	discovery, err := FetchServiceDiscovery(apiBaseURL, authToken)
 	if err != nil {
 		// Non-fatal: continue with defaults
 		fmt.Fprintf(os.Stderr, "Warning: Could not fetch service discovery: %v\n", err)
@@ -107,6 +114,69 @@ func runUpload(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("invalid Terraform state: missing 'resources' field")
 	}
 
+	// Load filter configuration
+	filterConfig, configSource, err := filter.GetMergedConfig()
+	if err != nil {
+		LogVerbose("⚠️  Failed to load filter config: %v", err)
+		// Continue with defaults
+		filterConfig = &filter.MergedConfig{
+			OmitResourceTypes:       filter.DefaultOmitResourceTypes,
+			OmitAttributes:          filter.DefaultOmitAttributes,
+			PreserveAttributes:      []string{},
+			HonorTerraformSensitive: true,
+		}
+		configSource = "defaults"
+	}
+	LogVerbose("🔒 Filter config source: %s", configSource)
+
+	// Merge with platform settings if available
+	if discovery != nil && discovery.Features.SensitiveFiltering.Available {
+		filterConfig.MergeWithPlatformSettings(
+			discovery.Features.SensitiveFiltering.AdditionalOmitTypes,
+			discovery.Features.SensitiveFiltering.AdditionalOmitAttributes,
+		)
+		LogVerbose("🔒 Merged platform filtering settings")
+
+		// Check if filtering is enforced by the platform
+		if noFilter && discovery.Features.SensitiveFiltering.Enforced {
+			return fmt.Errorf("⛔ Filtering is required by your organization's settings. Cannot use --no-filter")
+		}
+	}
+
+	// Apply filtering unless disabled
+	var uploadData []byte
+	sensitiveFiltered := false
+	if noFilter {
+		LogVerbose("⚠️  Sensitive data filtering disabled")
+		uploadData = stateData
+	} else {
+		LogVerbose("🔒 Applying sensitive data filter...")
+		filterResult, err := filter.Filter(stateData, filterConfig)
+		if err != nil {
+			return fmt.Errorf("failed to filter state: %w", err)
+		}
+
+		// Log omissions in verbose mode
+		if Verbose {
+			filter.PrintVerboseOmissions(filterResult, LogVerbose)
+		}
+
+		// Handle dry-run mode
+		if filterDryRun {
+			// Suppress verbose output for JSON format
+			format := filter.OutputFormatText
+			if outputFormat == "json" {
+				format = filter.OutputFormatJSON
+			}
+			return filter.PrintDryRunReport(filterResult, filterConfig, configSource, format)
+		}
+
+		uploadData = filterResult.FilteredJSON
+		sensitiveFiltered = true
+		LogVerbose("📊 Filtered state size: %d bytes (original: %d bytes)",
+			len(uploadData), len(stateData))
+	}
+
 	// Build upload URL using discovered endpoint
 	stateEndpoint := discovery.Endpoints.StateUpload
 	if stateEndpoint == "" {
@@ -118,7 +188,8 @@ func runUpload(cmd *cobra.Command, args []string) error {
 		Timeout: 60 * time.Second,
 	}
 
-	req, err := http.NewRequest("POST", uploadURL, bytes.NewReader(stateData))
+	LogVerbose("📤 POST %s", uploadURL)
+	req, err := http.NewRequest("POST", uploadURL, bytes.NewReader(uploadData))
 	if err != nil {
 		return fmt.Errorf("failed to create request: %w", err)
 	}
@@ -127,12 +198,17 @@ func runUpload(cmd *cobra.Command, args []string) error {
 	req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", authToken))
 	req.Header.Set("User-Agent", fmt.Sprintf("cora-cli/%s", Version))
 	req.Header.Set("X-Cora-CLI-Version", Version)
+	if sensitiveFiltered {
+		req.Header.Set("X-Cora-Sensitive-Filtered", "true")
+	}
 
 	resp, err := client.Do(req)
 	if err != nil {
 		return fmt.Errorf("failed to upload state: %w", err)
 	}
 	defer resp.Body.Close()
+
+	LogVerbose("📥 Response: %s", resp.Status)
 
 	// Check for CLI version warnings/errors in response headers
 	checkVersionHeaders(resp)

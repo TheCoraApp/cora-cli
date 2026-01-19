@@ -91,8 +91,12 @@ terraform show -json | cora upload --workspace my-app-prod --token YOUR_TOKEN
 |------|-------|-------------|
 | `--workspace` | `-w` | Target workspace name (required) |
 | `--file` | `-f` | Path to Terraform state file (reads from stdin if not provided) |
+| `--no-filter` | | Disable sensitive data filtering |
+| `--filter-dry-run` | | Show what would be filtered without uploading |
+| `--output-format` | | Output format for dry-run: `text` or `json` (default: text) |
 | `--token` | | API token (overrides CORA_TOKEN env var and stored config) |
 | `--api-url` | | API URL (default: https://thecora.app) |
+| `--verbose` | `-v` | Enable verbose output |
 
 ### Review Command
 
@@ -124,8 +128,12 @@ terraform show -json tfplan | cora review \
 | `--github-repo` | | GitHub repository name (for PR comments) |
 | `--pr-number` | | GitHub PR number (for PR comments) |
 | `--commit-sha` | | Git commit SHA (for PR comments) |
+| `--no-filter` | | Disable sensitive data filtering |
+| `--filter-dry-run` | | Show what would be filtered without uploading |
+| `--output-format` | | Output format for dry-run: `text` or `json` (default: text) |
 | `--token` | | API token (overrides CORA_TOKEN env var and stored config) |
 | `--api-url` | | API URL (default: https://thecora.app) |
+| `--verbose` | `-v` | Enable verbose output |
 
 **Output:**
 ```
@@ -176,6 +184,157 @@ cora version
 1. Command-line flags
 2. Environment variables
 3. Stored configuration (`~/.config/cora/credentials.json`)
+
+## Verbose Mode
+
+Use the `-v` or `--verbose` flag to see detailed output about what the CLI is doing:
+
+```bash
+terraform show -json | cora upload --workspace my-app -v
+```
+
+**Example output:**
+```
+🔑 Using token from CORA_TOKEN environment variable
+🌐 Using default API URL: https://thecora.app
+📡 Fetching service discovery from /.well-known/cora.json
+🔒 Filter config source: defaults
+🔒 Applying sensitive data filter...
+🔒 Filtering sensitive data: 0 resources omitted, 3 attributes omitted
+   🚫 aws_db_instance.main.password
+   🚫 aws_db_instance.main.master_password
+   🚫 aws_secretsmanager_secret.api_key.secret_string
+📊 Filtered state size: 45123 bytes (original: 45892 bytes)
+📤 POST https://thecora.app/api/terraform-state?workspace=my-app
+📥 Response: 201 Created
+State uploaded successfully to workspace 'my-app'
+Resources: 47
+```
+
+Verbose output is written to stderr so it doesn't interfere with piped JSON output.
+
+## Sensitive Data Filtering
+
+The Cora CLI automatically filters sensitive data from your Terraform state and plan files before uploading. This helps ensure passwords, secrets, API keys, and other sensitive values never leave your environment.
+
+### How It Works
+
+Filtering is **enabled by default**. The CLI:
+
+1. **Omits entire resources** of sensitive types (e.g., `aws_secretsmanager_secret_version`, `random_password`)
+2. **Omits attributes** that match sensitive patterns (e.g., `password`, `secret`, `api_key`)
+3. **Honors Terraform's `sensitive_attributes`** markers from the state file
+
+### Dry Run Mode
+
+Preview what would be filtered without uploading:
+
+```bash
+terraform show -json | cora upload --workspace my-app --filter-dry-run
+```
+
+**Example output:**
+```
+🔒 Sensitive Data Filter - Dry Run Report
+──────────────────────────────────────────────────
+
+📊 Summary
+   Resources: 47 total, 2 omitted
+   Attributes: 156 total, 5 omitted
+   Config source: defaults
+
+🗑️  Omitted Resources
+   ⛔ aws_secretsmanager_secret_version.api_key
+      resource type 'aws_secretsmanager_secret_version' is in omit list
+   ⛔ random_password.db_password
+      resource type 'random_password' is in omit list
+
+🔐 Omitted Attributes
+   🚫 aws_db_instance.main.password
+      attribute name matches omit pattern
+   🚫 aws_db_instance.main.master_password
+      attribute name matches omit pattern
+
+ℹ️  Use --no-filter to upload without filtering (if allowed by your organization)
+```
+
+For machine-readable output (useful in CI):
+
+```bash
+terraform show -json | cora upload --workspace my-app --filter-dry-run --output-format json
+```
+
+### Disabling Filtering
+
+To upload without filtering (not recommended):
+
+```bash
+terraform show -json | cora upload --workspace my-app --no-filter
+```
+
+> **Note:** Your organization may enforce filtering. If so, using `--no-filter` will result in an error.
+
+### Default Sensitive Patterns
+
+**Resource types omitted entirely:**
+- `aws_secretsmanager_secret_version`
+- `aws_ssm_parameter`
+- `random_password`
+- `random_string`
+- `tls_private_key`
+- `acme_certificate`
+- `vault_generic_secret`
+- `vault_kv_secret`
+- `vault_kv_secret_v2`
+- `azurerm_key_vault_secret`
+- `google_secret_manager_secret_version`
+
+**Attribute patterns omitted:**
+- `password`, `master_password`, `admin_password`
+- `secret`, `secret_string`, `secret_binary`
+- `api_key`, `api_secret`
+- `token`, `auth_token`, `access_token`
+- `private_key`, `private_key_pem`
+- `access_key`, `secret_key`, `secret_access_key`
+- `credential`, `credentials`
+- `connection_string`, `connection_url`
+
+### Configuration File (.cora.yaml)
+
+You can customize filtering by creating a `.cora.yaml` file in your project directory (or any parent directory):
+
+```yaml
+version: 1
+
+filtering:
+  # Additional resource types to omit (merged with defaults)
+  omit_resource_types:
+    - custom_secret_resource
+    - my_internal_credential
+
+  # Additional attribute patterns to omit (merged with defaults)
+  omit_attributes:
+    - internal_api_key
+    - my_custom_secret
+
+  # Attributes to never omit (overrides defaults)
+  preserve_attributes:
+    - public_dns_name
+    - public_ip
+
+  # Whether to honor Terraform's sensitive_attributes markers (default: true)
+  honor_terraform_sensitive: true
+```
+
+The CLI searches for `.cora.yaml` or `.cora.yml` starting from the current directory and walking up to parent directories.
+
+### Configuration Priority
+
+1. Command-line flags (`--no-filter`)
+2. Environment variables
+3. Project config file (`.cora.yaml`)
+4. Platform settings (from your organization)
+5. Built-in defaults
 
 ## Atlantis Integration
 

@@ -12,8 +12,9 @@ var (
 	Version = "dev"
 
 	// Global flags
-	apiURL string
-	token  string
+	apiURL  string
+	token   string
+	Verbose bool
 )
 
 var rootCmd = &cobra.Command{
@@ -37,23 +38,34 @@ func Execute() error {
 func init() {
 	rootCmd.PersistentFlags().StringVar(&apiURL, "api-url", "", "Cora API URL (default: https://thecora.app)")
 	rootCmd.PersistentFlags().StringVar(&token, "token", "", "API token (or set CORA_TOKEN env var)")
+	rootCmd.PersistentFlags().BoolVarP(&Verbose, "verbose", "v", false, "Enable verbose output")
+}
+
+// LogVerbose prints a message to stderr if verbose mode is enabled
+func LogVerbose(format string, args ...interface{}) {
+	if Verbose {
+		fmt.Fprintf(os.Stderr, format+"\n", args...)
+	}
 }
 
 // getToken returns the API token from flag, env var, or config file (in that order)
 func getToken() (string, error) {
 	// 1. Check flag
 	if token != "" {
+		LogVerbose("🔑 Using token from --token flag")
 		return token, nil
 	}
 
 	// 2. Check environment variable
 	if envToken := os.Getenv("CORA_TOKEN"); envToken != "" {
+		LogVerbose("🔑 Using token from CORA_TOKEN environment variable")
 		return envToken, nil
 	}
 
 	// 3. Check config file
 	cfg, err := LoadConfig()
 	if err == nil && cfg.Token != "" {
+		LogVerbose("🔑 Using token from config file")
 		return cfg.Token, nil
 	}
 
@@ -64,20 +76,25 @@ func getToken() (string, error) {
 func getAPIURL() string {
 	// 1. Check flag
 	if apiURL != "" {
+		LogVerbose("🌐 Using API URL from --api-url flag: %s", apiURL)
 		return apiURL
 	}
 
 	// 2. Check environment variable
 	if envURL := os.Getenv("CORA_API_URL"); envURL != "" {
+		LogVerbose("🌐 Using API URL from CORA_API_URL environment variable: %s", envURL)
 		return envURL
 	}
 
 	// 3. Check config file
 	cfg, err := LoadConfig()
 	if err == nil && cfg.APIURL != "" {
+		LogVerbose("🌐 Using API URL from config file: %s", cfg.APIURL)
 		return cfg.APIURL
 	}
 
 	// 4. Default
-	return "https://thecora.app"
+	defaultURL := "https://thecora.app"
+	LogVerbose("🌐 Using default API URL: %s", defaultURL)
+	return defaultURL
 }

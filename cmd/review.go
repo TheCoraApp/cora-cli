@@ -9,6 +9,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/clairitydev/cora/internal/filter"
 	"github.com/spf13/cobra"
 )
 
@@ -51,10 +52,15 @@ var (
 	reviewSource    string
 
 	// GitHub context for PR comments
-	githubOwner  string
-	githubRepo   string
-	prNumber     int
-	commitSha    string
+	githubOwner string
+	githubRepo  string
+	prNumber    int
+	commitSha   string
+
+	// Filtering flags for review command
+	reviewNoFilter     bool
+	reviewFilterDryRun bool
+	reviewOutputFormat string
 )
 
 func init() {
@@ -73,6 +79,11 @@ func init() {
 	reviewCmd.Flags().StringVar(&githubRepo, "github-repo", "", "GitHub repository name (for PR comments)")
 	reviewCmd.Flags().IntVar(&prNumber, "pr-number", 0, "GitHub PR number (for PR comments)")
 	reviewCmd.Flags().StringVar(&commitSha, "commit-sha", "", "Git commit SHA (for PR comments)")
+
+	// Filtering flags
+	reviewCmd.Flags().BoolVar(&reviewNoFilter, "no-filter", false, "Disable sensitive data filtering")
+	reviewCmd.Flags().BoolVar(&reviewFilterDryRun, "filter-dry-run", false, "Show what would be filtered without uploading")
+	reviewCmd.Flags().StringVar(&reviewOutputFormat, "output-format", "text", "Output format for dry-run: text or json")
 }
 
 // PlanUploadRequest matches the server-side PlanUploadRequest type
@@ -126,8 +137,8 @@ func runReview(cmd *cobra.Command, args []string) error {
 	// Get API URL
 	apiBaseURL := getAPIURL()
 
-	// Fetch service discovery to get endpoints
-	discovery, err := FetchServiceDiscovery(apiBaseURL)
+	// Fetch service discovery to get endpoints (pass token for account-specific settings)
+	discovery, err := FetchServiceDiscovery(apiBaseURL, authToken)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Warning: Could not fetch service discovery: %v\n", err)
 	}
@@ -179,6 +190,70 @@ func runReview(cmd *cobra.Command, args []string) error {
 			return fmt.Errorf("this appears to be Terraform state, not a plan.\n\nUse 'terraform show -json tfplan' to output plan JSON, not 'terraform show -json'")
 		}
 		return fmt.Errorf("invalid Terraform plan: missing 'resource_changes' field.\n\nMake sure you're using 'terraform show -json <planfile>'")
+	}
+
+	// Load filter configuration
+	filterConfig, configSource, err := filter.GetMergedConfig()
+	if err != nil {
+		LogVerbose("⚠️  Failed to load filter config: %v", err)
+		filterConfig = &filter.MergedConfig{
+			OmitResourceTypes:       filter.DefaultOmitResourceTypes,
+			OmitAttributes:          filter.DefaultOmitAttributes,
+			PreserveAttributes:      []string{},
+			HonorTerraformSensitive: true,
+		}
+		configSource = "defaults"
+	}
+	LogVerbose("🔒 Filter config source: %s", configSource)
+
+	// Merge with platform settings if available
+	if discovery != nil && discovery.Features.SensitiveFiltering.Available {
+		filterConfig.MergeWithPlatformSettings(
+			discovery.Features.SensitiveFiltering.AdditionalOmitTypes,
+			discovery.Features.SensitiveFiltering.AdditionalOmitAttributes,
+		)
+		LogVerbose("🔒 Merged platform filtering settings")
+
+		// Check if filtering is enforced by the platform
+		if reviewNoFilter && discovery.Features.SensitiveFiltering.Enforced {
+			return fmt.Errorf("⛔ Filtering is required by your organization's settings. Cannot use --no-filter")
+		}
+	}
+
+	// Apply filtering to the plan JSON unless disabled
+	if !reviewNoFilter {
+		LogVerbose("🔒 Applying sensitive data filter to plan...")
+		filterResult, err := filter.FilterPlan(planData, filterConfig)
+		if err != nil {
+			return fmt.Errorf("failed to filter plan: %w", err)
+		}
+
+		// Log omissions in verbose mode
+		if Verbose {
+			filter.PrintVerboseOmissions(filterResult, LogVerbose)
+		}
+
+		// Handle dry-run mode
+		if reviewFilterDryRun {
+			format := filter.OutputFormatText
+			if reviewOutputFormat == "json" {
+				format = filter.OutputFormatJSON
+			}
+			return filter.PrintDryRunReport(filterResult, filterConfig, configSource, format)
+		}
+
+		// Re-parse the filtered plan
+		if err := json.Unmarshal(filterResult.FilteredJSON, &planJSON); err != nil {
+			return fmt.Errorf("failed to parse filtered plan: %w", err)
+		}
+		LogVerbose("📊 Filtered plan size: %d bytes (original: %d bytes)",
+			len(filterResult.FilteredJSON), len(planData))
+	} else {
+		LogVerbose("⚠️  Sensitive data filtering disabled")
+		if reviewFilterDryRun {
+			fmt.Println("ℹ️  Dry-run has no effect when --no-filter is used")
+			return nil
+		}
 	}
 
 	// Build request payload

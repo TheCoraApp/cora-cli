@@ -12,10 +12,10 @@ import (
 
 // CoraServiceDiscovery represents the service discovery document from .well-known/cora.json
 type CoraServiceDiscovery struct {
-	Version   string              `json:"version"`
-	CLI       CLIVersionInfo      `json:"cli"`
-	Endpoints ServiceEndpoints    `json:"endpoints"`
-	Features  FeatureFlags        `json:"features"`
+	Version   string           `json:"version"`
+	CLI       CLIVersionInfo   `json:"cli"`
+	Endpoints ServiceEndpoints `json:"endpoints"`
+	Features  FeatureFlags     `json:"features"`
 }
 
 // CLIVersionInfo contains CLI version requirements
@@ -37,8 +37,17 @@ type ServiceEndpoints struct {
 
 // FeatureFlags indicates which features are available
 type FeatureFlags struct {
-	PRRiskAssessment bool `json:"prRiskAssessment"`
-	StateEncryption  bool `json:"stateEncryption"`
+	PRRiskAssessment   bool                     `json:"prRiskAssessment"`
+	StateEncryption    bool                     `json:"stateEncryption"`
+	SensitiveFiltering SensitiveFilteringConfig `json:"sensitiveFiltering"`
+}
+
+// SensitiveFilteringConfig contains platform-level filtering settings
+type SensitiveFilteringConfig struct {
+	Available                bool     `json:"available"`
+	Enforced                 bool     `json:"enforced"`
+	AdditionalOmitTypes      []string `json:"additionalOmitTypes"`
+	AdditionalOmitAttributes []string `json:"additionalOmitAttributes"`
 }
 
 // Default endpoints (fallback if discovery fails)
@@ -62,6 +71,12 @@ var defaultDiscovery = CoraServiceDiscovery{
 	Features: FeatureFlags{
 		PRRiskAssessment: true,
 		StateEncryption:  true,
+		SensitiveFiltering: SensitiveFilteringConfig{
+			Available:                true,
+			Enforced:                 false,
+			AdditionalOmitTypes:      []string{},
+			AdditionalOmitAttributes: []string{},
+		},
 	},
 }
 
@@ -76,7 +91,8 @@ var (
 
 // FetchServiceDiscovery retrieves the service discovery document from the API.
 // Results are cached for 1 hour to avoid repeated network calls.
-func FetchServiceDiscovery(baseURL string) (*CoraServiceDiscovery, error) {
+// If a token is provided, it's sent for account-specific settings (e.g., filtering rules).
+func FetchServiceDiscovery(baseURL, token string) (*CoraServiceDiscovery, error) {
 	baseURL = strings.TrimSuffix(baseURL, "/")
 
 	// Check cache first
@@ -90,6 +106,7 @@ func FetchServiceDiscovery(baseURL string) (*CoraServiceDiscovery, error) {
 
 	// Fetch from server
 	discoveryURL := fmt.Sprintf("%s/.well-known/cora.json", baseURL)
+	LogVerbose("📡 Fetching service discovery from %s", discoveryURL)
 
 	client := &http.Client{
 		Timeout: 10 * time.Second,
@@ -102,27 +119,47 @@ func FetchServiceDiscovery(baseURL string) (*CoraServiceDiscovery, error) {
 
 	req.Header.Set("User-Agent", fmt.Sprintf("cora-cli/%s", Version))
 	req.Header.Set("X-Cora-CLI-Version", Version)
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
 
 	resp, err := client.Do(req)
 	if err != nil {
 		// On network error, return defaults
+		LogVerbose("⚠️  Discovery request failed: %v, using defaults", err)
 		return useDefaultDiscovery(baseURL, nil)
 	}
 	defer resp.Body.Close()
 
+	LogVerbose("📥 Discovery response: %s", resp.Status)
+
 	if resp.StatusCode != http.StatusOK {
 		// On non-200, return defaults (server might not support discovery yet)
+		LogVerbose("⚠️  Discovery returned non-200, using defaults")
 		return useDefaultDiscovery(baseURL, nil)
 	}
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
+		LogVerbose("⚠️  Failed to read discovery response: %v", err)
 		return useDefaultDiscovery(baseURL, err)
 	}
 
 	var discovery CoraServiceDiscovery
 	if err := json.Unmarshal(body, &discovery); err != nil {
+		LogVerbose("⚠️  Failed to parse discovery JSON: %v", err)
 		return useDefaultDiscovery(baseURL, err)
+	}
+
+	// Log filtering settings
+	LogVerbose("🔒 Sensitive filtering available: %v, enforced: %v",
+		discovery.Features.SensitiveFiltering.Available,
+		discovery.Features.SensitiveFiltering.Enforced)
+	if len(discovery.Features.SensitiveFiltering.AdditionalOmitTypes) > 0 {
+		LogVerbose("   Organization omit types: %v", discovery.Features.SensitiveFiltering.AdditionalOmitTypes)
+	}
+	if len(discovery.Features.SensitiveFiltering.AdditionalOmitAttributes) > 0 {
+		LogVerbose("   Organization omit attributes: %v", discovery.Features.SensitiveFiltering.AdditionalOmitAttributes)
 	}
 
 	// Cache the result
