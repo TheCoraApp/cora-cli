@@ -167,6 +167,29 @@ cora configure --token YOUR_TOKEN --api-url https://cora.example.com
 
 Configuration is stored in `~/.config/cora/credentials.json` with secure permissions (0600).
 
+### Init Command
+
+The `init` command creates a `.cora.yaml` configuration file in the current directory with default settings and helpful comments.
+
+```bash
+# Create a new config file with full documentation
+cora init
+
+# Overwrite an existing config file
+cora init --force
+
+# Create a minimal config without comments
+cora init --minimal
+```
+
+**Flags:**
+| Flag | Short | Description |
+|------|-------|-------------|
+| `--force` | `-f` | Overwrite existing .cora.yaml file |
+| `--minimal` | | Generate minimal config without comments |
+
+The generated `.cora.yaml` file customizes how sensitive data is filtered from your Terraform state before uploading. See [Configuration documentation](https://thecora.app/docs/sensitive-data#project-config) for details on all available options.
+
 ### Version Command
 
 ```bash
