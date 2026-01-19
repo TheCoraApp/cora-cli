@@ -28,9 +28,20 @@ builds:
       - -X github.com/clairitydev/cora/cmd.Version={{.Version}}
 
 archives:
-  - id: default
+  - id: versioned
     format: tar.gz
     name_template: "{{ .ProjectName }}_{{ .Tag }}_{{ .Os }}_{{ .Arch }}"
+    format_overrides:
+      - goos: windows
+        format: zip
+    files:
+      - README.md
+      - LICENSE
+
+  # Version-less archives for /releases/latest/download/ URLs
+  - id: latest
+    format: tar.gz
+    name_template: "{{ .ProjectName }}_{{ .Os }}_{{ .Arch }}"
     format_overrides:
       - goos: windows
         format: zip
