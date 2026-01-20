@@ -90,13 +90,13 @@ func TestDetect_NoEnvironment(t *testing.T) {
 
 func TestDetect_Atlantis(t *testing.T) {
 	tests := []struct {
-		name            string
-		envVars         map[string]string
-		wantName        string
-		wantWorkspace   string
-		wantGitHub      bool
-		wantPRNumber    int
-		wantWarnings    int
+		name          string
+		envVars       map[string]string
+		wantName      string
+		wantWorkspace string
+		wantGitHub    bool
+		wantPRNumber  int
+		wantWarnings  int
 	}{
 		{
 			name: "full atlantis context",

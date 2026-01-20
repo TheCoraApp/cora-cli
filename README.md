@@ -423,7 +423,49 @@ The CLI searches for `.cora.yaml` or `.cora.yml` starting from the current direc
 
 The Cora CLI is designed to work seamlessly with [Atlantis](https://www.runatlantis.io/). When running inside Atlantis, the CLI **automatically detects** the environment and extracts context from Atlantis native environment variables.
 
-### Setup
+### Quick Setup with `cora atlantis init`
+
+The fastest way to add Cora to your Atlantis configuration is with the `atlantis init` command:
+
+```bash
+# Navigate to your repo root
+cd /path/to/your/repo
+
+# Automatically add Cora steps to your atlantis.yaml
+cora atlantis init
+```
+
+This command:
+- Finds your `atlantis.yaml` file automatically
+- Adds `cora review` after plan steps (for PR risk assessment)
+- Adds `cora upload` after apply steps (to capture state)
+- Is idempotent - running it twice won't duplicate steps
+- Shows you exactly what will change before modifying
+
+**Flags:**
+| Flag | Description |
+|------|-------------|
+| `--config <path>` | Path to atlantis.yaml (auto-detected by default) |
+| `--dry-run` | Preview changes without modifying the file |
+| `--backup` | Create a backup file before modifying |
+| `--force` | Skip confirmation prompt |
+
+**Examples:**
+
+```bash
+# Preview what would change
+cora atlantis init --dry-run
+
+# Create a backup before modifying
+cora atlantis init --backup
+
+# Specify a custom config path
+cora atlantis init --config ./infra/atlantis.yaml
+```
+
+### Manual Setup
+
+If you prefer to configure manually:
 
 1. **Create an API token** at [https://thecora.app/settings/tokens](https://thecora.app/settings/tokens)
 

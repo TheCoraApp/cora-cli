@@ -57,16 +57,16 @@ func Detect() *DetectionResult {
 
 // AtlantisEnv represents the Atlantis CI environment
 type AtlantisEnv struct {
-	workspace     string
-	projectName   string
-	repoOwner     string
-	repoName      string
-	prNumber      int
-	commitSHA     string
-	headBranch    string
-	baseBranch    string
-	relativeDir   string
-	tfVersion     string
+	workspace   string
+	projectName string
+	repoOwner   string
+	repoName    string
+	prNumber    int
+	commitSHA   string
+	headBranch  string
+	baseBranch  string
+	relativeDir string
+	tfVersion   string
 }
 
 func detectAtlantis() *DetectionResult {
