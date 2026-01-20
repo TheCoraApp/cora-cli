@@ -9,6 +9,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/clairitydev/cora/internal/environment"
 	"github.com/clairitydev/cora/internal/filter"
 	"github.com/spf13/cobra"
 )
@@ -25,6 +26,12 @@ This command analyzes your Terraform plan and provides:
 
 The plan can be provided via stdin (pipe) or from a file.
 
+Environment Auto-Detection:
+  When running in Atlantis or GitHub Actions, the CLI automatically detects
+  the environment and populates GitHub context (owner, repo, PR number, commit)
+  from native environment variables. You can override any auto-detected value
+  by explicitly passing the corresponding flag.
+
 Examples:
   # Pipe from terraform show
   terraform show -json tfplan | cora review --workspace my-app-prod
@@ -32,7 +39,10 @@ Examples:
   # Read from file
   cora review --workspace my-app-prod --file plan.json
 
-  # With GitHub PR context (for automated comments)
+  # In Atlantis: context is auto-detected, just run:
+  terraform show -json tfplan | cora review --workspace my-app-prod
+
+  # With explicit GitHub PR context (overrides auto-detection)
   terraform show -json tfplan | cora review \
     --workspace my-app-prod \
     --github-owner myorg \
@@ -43,7 +53,8 @@ Examples:
 Environment Variables:
   CORA_TOKEN     API token (alternative to --token flag)
   CORA_API_URL   API URL (alternative to --api-url flag)`,
-	RunE: runReview,
+	PreRunE: autoDetectEnvironment,
+	RunE:    runReview,
 }
 
 var (
@@ -63,16 +74,67 @@ var (
 	reviewOutputFormat string
 )
 
+// autoDetectEnvironment detects CI/CD environment and auto-populates flags
+func autoDetectEnvironment(cmd *cobra.Command, args []string) error {
+	result := environment.Detect()
+	if result == nil {
+		LogVerbose("🔍 No CI/CD environment detected, using CLI defaults")
+		return nil
+	}
+
+	env := result.Environment
+	LogVerbose("🔍 Auto-detected: %s", env.Description())
+
+	// Print any warnings
+	for _, warning := range result.Warnings {
+		fmt.Fprintf(os.Stderr, "⚠️  %s\n", warning)
+	}
+
+	// Auto-populate source if not explicitly set
+	if !cmd.Flags().Changed("source") {
+		reviewSource = env.Name()
+		LogVerbose("   → source=%s (auto-detected)", reviewSource)
+	}
+
+	// Auto-populate workspace if not explicitly set and environment provides one
+	if !cmd.Flags().Changed("workspace") && env.Workspace() != "" {
+		reviewWorkspace = env.Workspace()
+		LogVerbose("   → workspace=%s (auto-detected)", reviewWorkspace)
+	}
+
+	// Auto-populate GitHub context if available
+	gh := env.GitHubContext()
+	if gh != nil {
+		if !cmd.Flags().Changed("github-owner") {
+			githubOwner = gh.Owner
+			LogVerbose("   → github-owner=%s (auto-detected)", githubOwner)
+		}
+		if !cmd.Flags().Changed("github-repo") {
+			githubRepo = gh.Repo
+			LogVerbose("   → github-repo=%s (auto-detected)", githubRepo)
+		}
+		if !cmd.Flags().Changed("pr-number") {
+			prNumber = gh.PRNumber
+			LogVerbose("   → pr-number=%d (auto-detected)", prNumber)
+		}
+		if !cmd.Flags().Changed("commit-sha") {
+			commitSha = gh.CommitSHA
+			LogVerbose("   → commit-sha=%s (auto-detected)", commitSha)
+		}
+	}
+
+	return nil
+}
+
 func init() {
 	rootCmd.AddCommand(reviewCmd)
 
-	// Required flags
-	reviewCmd.Flags().StringVarP(&reviewWorkspace, "workspace", "w", "", "Target workspace name (required)")
-	_ = reviewCmd.MarkFlagRequired("workspace")
+	// Workspace flag - optional when auto-detected from CI/CD environment
+	reviewCmd.Flags().StringVarP(&reviewWorkspace, "workspace", "w", "", "Target workspace name (auto-detected in Atlantis/GitHub Actions)")
 
 	// Plan input
 	reviewCmd.Flags().StringVarP(&reviewPlanFile, "file", "f", "", "Path to Terraform plan JSON file (reads from stdin if not provided)")
-	reviewCmd.Flags().StringVar(&reviewSource, "source", "cli", "Source identifier (e.g., 'atlantis', 'github-actions', 'cli')")
+	reviewCmd.Flags().StringVar(&reviewSource, "source", "cli", "Source identifier (auto-detected: 'atlantis', 'github-actions', or 'cli')")
 
 	// GitHub context (optional, for PR comments)
 	reviewCmd.Flags().StringVar(&githubOwner, "github-owner", "", "GitHub repository owner (for PR comments)")
@@ -128,6 +190,11 @@ type GitHubResult struct {
 }
 
 func runReview(cmd *cobra.Command, args []string) error {
+	// Validate workspace is set (either from flag or auto-detection)
+	if reviewWorkspace == "" {
+		return fmt.Errorf("workspace is required. Use --workspace flag or run in a CI/CD environment (Atlantis/GitHub Actions) for auto-detection")
+	}
+
 	// Get authentication token
 	authToken, err := getToken()
 	if err != nil {

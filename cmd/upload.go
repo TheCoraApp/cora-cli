@@ -9,6 +9,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/clairitydev/cora/internal/environment"
 	"github.com/clairitydev/cora/internal/filter"
 	"github.com/spf13/cobra"
 )
@@ -20,6 +21,12 @@ var uploadCmd = &cobra.Command{
 
 The state can be provided via stdin (pipe) or from a file.
 
+Environment Auto-Detection:
+  When running in Atlantis or GitHub Actions, the CLI automatically detects
+  the environment and can auto-populate the workspace name from native
+  environment variables. You can override any auto-detected value by
+  explicitly passing the corresponding flag.
+
 Examples:
   # Pipe from terraform show
   terraform show -json | cora upload --workspace my-app-prod
@@ -27,34 +34,73 @@ Examples:
   # Read from file
   cora upload --workspace my-app-prod --file terraform.tfstate.json
 
+  # In Atlantis: workspace is auto-constructed from PROJECT_NAME and WORKSPACE
+  terraform show -json | cora upload
+
   # With explicit token
   terraform show -json | cora upload --workspace my-app-prod --token YOUR_TOKEN
 
 Environment Variables:
   CORA_TOKEN     API token (alternative to --token flag)
   CORA_API_URL   API URL (alternative to --api-url flag)`,
-	RunE: runUpload,
+	PreRunE: autoDetectUploadEnvironment,
+	RunE:    runUpload,
 }
 
 var (
 	workspace    string
 	stateFile    string
+	uploadSource string
 	noFilter     bool
 	filterDryRun bool
 	outputFormat string
 )
 
+// autoDetectUploadEnvironment detects CI/CD environment and auto-populates flags for upload
+func autoDetectUploadEnvironment(cmd *cobra.Command, args []string) error {
+	result := environment.Detect()
+	if result == nil {
+		LogVerbose("🔍 No CI/CD environment detected, using CLI defaults")
+		return nil
+	}
+
+	env := result.Environment
+	LogVerbose("🔍 Auto-detected: %s", env.Description())
+
+	// Print any warnings (for upload, we don't need PR context warnings)
+	// since upload doesn't post PR comments
+
+	// Auto-populate source if not explicitly set
+	if !cmd.Flags().Changed("source") {
+		uploadSource = env.Name()
+		LogVerbose("   → source=%s (auto-detected)", uploadSource)
+	}
+
+	// Auto-populate workspace if not explicitly set and environment provides one
+	if !cmd.Flags().Changed("workspace") && env.Workspace() != "" {
+		workspace = env.Workspace()
+		LogVerbose("   → workspace=%s (auto-detected)", workspace)
+	}
+
+	return nil
+}
+
 func init() {
 	rootCmd.AddCommand(uploadCmd)
-	uploadCmd.Flags().StringVarP(&workspace, "workspace", "w", "", "Target workspace name (required)")
+	uploadCmd.Flags().StringVarP(&workspace, "workspace", "w", "", "Target workspace name (auto-detected in Atlantis/GitHub Actions)")
 	uploadCmd.Flags().StringVarP(&stateFile, "file", "f", "", "Path to Terraform state file (reads from stdin if not provided)")
+	uploadCmd.Flags().StringVar(&uploadSource, "source", "cli", "Source identifier (auto-detected: 'atlantis', 'github-actions', or 'cli')")
 	uploadCmd.Flags().BoolVar(&noFilter, "no-filter", false, "Disable sensitive data filtering")
 	uploadCmd.Flags().BoolVar(&filterDryRun, "filter-dry-run", false, "Show what would be filtered without uploading")
 	uploadCmd.Flags().StringVar(&outputFormat, "output-format", "text", "Output format for dry-run: text or json")
-	_ = uploadCmd.MarkFlagRequired("workspace")
 }
 
 func runUpload(cmd *cobra.Command, args []string) error {
+	// Validate workspace is set (either from flag or auto-detection)
+	if workspace == "" {
+		return fmt.Errorf("workspace is required. Use --workspace flag or run in a CI/CD environment (Atlantis/GitHub Actions) for auto-detection")
+	}
+
 	// Get authentication token
 	authToken, err := getToken()
 	if err != nil {
@@ -198,6 +244,7 @@ func runUpload(cmd *cobra.Command, args []string) error {
 	req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", authToken))
 	req.Header.Set("User-Agent", fmt.Sprintf("cora-cli/%s", Version))
 	req.Header.Set("X-Cora-CLI-Version", Version)
+	req.Header.Set("X-Cora-Source", uploadSource)
 	if sensitiveFiltered {
 		req.Header.Set("X-Cora-Sensitive-Filtered", "true")
 	}

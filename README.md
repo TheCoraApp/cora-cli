@@ -89,8 +89,9 @@ terraform show -json | cora upload --workspace my-app-prod --token YOUR_TOKEN
 **Flags:**
 | Flag | Short | Description |
 |------|-------|-------------|
-| `--workspace` | `-w` | Target workspace name (required) |
+| `--workspace` | `-w` | Target workspace name (auto-detected in Atlantis/GitHub Actions) |
 | `--file` | `-f` | Path to Terraform state file (reads from stdin if not provided) |
+| `--source` | | Source identifier (auto-detected: 'atlantis', 'github-actions', or 'cli') |
 | `--no-filter` | | Disable sensitive data filtering |
 | `--filter-dry-run` | | Show what would be filtered without uploading |
 | `--output-format` | | Output format for dry-run: `text` or `json` (default: text) |
@@ -121,13 +122,13 @@ terraform show -json tfplan | cora review \
 **Flags:**
 | Flag | Short | Description |
 |------|-------|-------------|
-| `--workspace` | `-w` | Target workspace name (required) |
+| `--workspace` | `-w` | Target workspace name (auto-detected in Atlantis/GitHub Actions) |
 | `--file` | `-f` | Path to Terraform plan JSON file (reads from stdin if not provided) |
-| `--source` | | Source identifier (e.g., 'atlantis', 'github-actions', 'cli') |
-| `--github-owner` | | GitHub repository owner (for PR comments) |
-| `--github-repo` | | GitHub repository name (for PR comments) |
-| `--pr-number` | | GitHub PR number (for PR comments) |
-| `--commit-sha` | | Git commit SHA (for PR comments) |
+| `--source` | | Source identifier (auto-detected: 'atlantis', 'github-actions', or 'cli') |
+| `--github-owner` | | GitHub repository owner (auto-detected in Atlantis/GitHub Actions) |
+| `--github-repo` | | GitHub repository name (auto-detected in Atlantis/GitHub Actions) |
+| `--pr-number` | | GitHub PR number (auto-detected in Atlantis/GitHub Actions) |
+| `--commit-sha` | | Git commit SHA (auto-detected in Atlantis/GitHub Actions) |
 | `--no-filter` | | Disable sensitive data filtering |
 | `--filter-dry-run` | | Show what would be filtered without uploading |
 | `--output-format` | | Output format for dry-run: `text` or `json` (default: text) |
@@ -207,6 +208,65 @@ cora version
 1. Command-line flags
 2. Environment variables
 3. Stored configuration (`~/.config/cora/credentials.json`)
+
+## Environment Auto-Detection
+
+The Cora CLI automatically detects when it runs inside Atlantis or GitHub Actions and populates context from native environment variables. This eliminates the need to manually pass flags like `--source`, `--workspace`, and GitHub PR context.
+
+### How It Works
+
+**Detection priority:**
+1. Atlantis (detected via `ATLANTIS_TERRAFORM_VERSION`)
+2. GitHub Actions (detected via `GITHUB_ACTIONS=true`)
+
+**Auto-populated values:**
+
+| Flag | Atlantis Source | GitHub Actions Source |
+|------|-----------------|----------------------|
+| `--source` | `"atlantis"` | `"github-actions"` |
+| `--workspace` | `PROJECT_NAME-WORKSPACE` (or just `WORKSPACE`) | `GITHUB_HEAD_REF` or `GITHUB_REF_NAME` |
+| `--github-owner` | `BASE_REPO_OWNER` | Parsed from `GITHUB_REPOSITORY` |
+| `--github-repo` | `BASE_REPO_NAME` | Parsed from `GITHUB_REPOSITORY` |
+| `--pr-number` | `PULL_NUM` | Extracted from `GITHUB_REF` or event payload |
+| `--commit-sha` | `HEAD_COMMIT` | `GITHUB_SHA` |
+
+### Override Behavior
+
+Explicit flags always override auto-detected values. For example:
+
+```bash
+# In Atlantis, this will use "custom-workspace" instead of the auto-detected value
+terraform show -json | cora upload --workspace custom-workspace
+```
+
+Unset flags are auto-populated while explicitly set flags are preserved.
+
+### Verbose Output
+
+Use `--verbose` to see what was auto-detected:
+
+```bash
+terraform show -json | cora upload -v
+```
+
+**Example output:**
+```
+🔍 Auto-detected: Atlantis, repo=myorg/infra, PR=#123, workspace=my-app-prod
+   → source=atlantis (auto-detected)
+   → workspace=my-app-prod (auto-detected)
+   → github-owner=myorg (auto-detected)
+   → github-repo=infra (auto-detected)
+   → pr-number=123 (auto-detected)
+   → commit-sha=abc123 (auto-detected)
+```
+
+### Warnings
+
+If the CLI detects an environment but cannot extract complete context (e.g., running in GitHub Actions on a `push` event with no PR), it will print a warning:
+
+```
+⚠️  GitHub Actions detected but no PR context found (event: push). GitHub PR comments will be disabled.
+```
 
 ## Verbose Mode
 
@@ -361,7 +421,7 @@ The CLI searches for `.cora.yaml` or `.cora.yml` starting from the current direc
 
 ## Atlantis Integration
 
-The Cora CLI is designed to work seamlessly with [Atlantis](https://www.runatlantis.io/).
+The Cora CLI is designed to work seamlessly with [Atlantis](https://www.runatlantis.io/). When running inside Atlantis, the CLI **automatically detects** the environment and extracts context from Atlantis native environment variables.
 
 ### Setup
 
@@ -390,12 +450,26 @@ workflows:
     apply:
       steps:
         - apply
-        - run: terraform show -json | cora upload --workspace ${WORKSPACE}
+        # Workspace is auto-detected from PROJECT_NAME and WORKSPACE
+        - run: terraform show -json | cora upload
+    plan:
+      steps:
+        - init
+        - plan
+        # PR context is auto-detected - GitHub comments work automatically
+        - run: terraform show -json $PLANFILE | cora review
 ```
 
-### Dynamic Workspace Names
+### What Gets Auto-Detected
 
-You can use Atlantis variables to generate dynamic workspace names:
+In Atlantis, the CLI reads these native environment variables:
+- `PROJECT_NAME` + `WORKSPACE` → combined into workspace name
+- `BASE_REPO_OWNER`, `BASE_REPO_NAME` → GitHub repo context
+- `PULL_NUM`, `HEAD_COMMIT` → PR context for automated comments
+
+### Manual Override
+
+You can still override any auto-detected value:
 
 ```yaml
 workflows:
@@ -432,11 +506,15 @@ workflows:
 
 ### GitHub Actions
 
+When running in GitHub Actions, the CLI **automatically detects** the environment and extracts PR context from GitHub's native environment variables. This enables automatic PR comments without manual configuration.
+
 ```yaml
 name: Deploy Infrastructure
 
 on:
   push:
+    branches: [main]
+  pull_request:
     branches: [main]
 
 jobs:
@@ -453,13 +531,29 @@ jobs:
           curl -L https://github.com/clairitydev/cora-cli/releases/latest/download/cora_linux_amd64.tar.gz | tar xz
           sudo mv cora /usr/local/bin/
 
-      - name: Terraform Apply
-        run: terraform apply -auto-approve
+      - name: Terraform Plan
+        run: terraform plan -out=tfplan
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
 
-      - name: Upload to Cora
+      # PR context is auto-detected - no need to pass --github-owner, --github-repo, etc.
+      - name: Review Plan
+        if: github.event_name == 'pull_request'
+        run: terraform show -json tfplan | cora review --workspace production
+        env:
+          CORA_TOKEN: ${{ secrets.CORA_TOKEN }}
+
+      - name: Terraform Apply
+        if: github.ref == 'refs/heads/main'
+        run: terraform apply -auto-approve tfplan
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+
+      # Source is auto-detected as "github-actions"
+      - name: Upload State to Cora
+        if: github.ref == 'refs/heads/main'
         run: terraform show -json | cora upload --workspace production
         env:
           CORA_TOKEN: ${{ secrets.CORA_TOKEN }}
