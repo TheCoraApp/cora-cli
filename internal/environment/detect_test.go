@@ -94,6 +94,7 @@ func TestDetect_Atlantis(t *testing.T) {
 		envVars       map[string]string
 		wantName      string
 		wantWorkspace string
+		wantDir       string
 		wantGitHub    bool
 		wantPRNumber  int
 		wantWarnings  int
@@ -108,9 +109,11 @@ func TestDetect_Atlantis(t *testing.T) {
 				"BASE_REPO_NAME":             "infra",
 				"PULL_NUM":                   "123",
 				"HEAD_COMMIT":                "abc123",
+				"REPO_REL_DIR":               "services/api",
 			},
 			wantName:      "atlantis",
 			wantWorkspace: "my-app-default",
+			wantDir:       "services/api",
 			wantGitHub:    true,
 			wantPRNumber:  123,
 			wantWarnings:  0,
@@ -181,6 +184,10 @@ func TestDetect_Atlantis(t *testing.T) {
 				t.Errorf("Workspace() = %q, want %q", env.Workspace(), tt.wantWorkspace)
 			}
 
+			if env.WorkingDirectory() != tt.wantDir {
+				t.Errorf("WorkingDirectory() = %q, want %q", env.WorkingDirectory(), tt.wantDir)
+			}
+
 			gh := env.GitHubContext()
 			if tt.wantGitHub && gh == nil {
 				t.Error("Expected GitHubContext, got nil")
@@ -197,6 +204,17 @@ func TestDetect_Atlantis(t *testing.T) {
 					len(result.Warnings), tt.wantWarnings, result.Warnings)
 			}
 		})
+	}
+}
+
+func TestGitHubActionsEnv_WorkingDirectoryIsNotGuessed(t *testing.T) {
+	cleanup := clearAllCIEnvVars(t)
+	defer cleanup()
+	envCleanup := setEnv(t, map[string]string{"GITHUB_ACTIONS": "true", "GITHUB_REPOSITORY": "myorg/infra"})
+	defer envCleanup()
+
+	if dir := Detect().Environment.WorkingDirectory(); dir != "" {
+		t.Errorf("WorkingDirectory() = %q, want empty", dir)
 	}
 }
 
