@@ -58,9 +58,10 @@ Environment Variables:
 }
 
 var (
-	reviewWorkspace string
-	reviewPlanFile  string
-	reviewSource    string
+	reviewWorkspace        string
+	reviewPlanFile         string
+	reviewSource           string
+	reviewWorkingDirectory string
 
 	// GitHub context for PR comments
 	githubOwner string
@@ -102,6 +103,12 @@ func autoDetectEnvironment(cmd *cobra.Command, args []string) error {
 		LogVerbose("   → workspace=%s (auto-detected)", reviewWorkspace)
 	}
 
+	// Auto-populate the working directory if the environment reports it
+	if !cmd.Flags().Changed("working-directory") && env.WorkingDirectory() != "" {
+		reviewWorkingDirectory = env.WorkingDirectory()
+		LogVerbose("   → working-directory=%s (auto-detected)", reviewWorkingDirectory)
+	}
+
 	// Auto-populate GitHub context if available
 	gh := env.GitHubContext()
 	if gh != nil {
@@ -135,6 +142,7 @@ func init() {
 	// Plan input
 	reviewCmd.Flags().StringVarP(&reviewPlanFile, "file", "f", "", "Path to Terraform plan JSON file (reads from stdin if not provided)")
 	reviewCmd.Flags().StringVar(&reviewSource, "source", "cli", "Source identifier (auto-detected: 'atlantis', 'github-actions', or 'cli')")
+	reviewCmd.Flags().StringVar(&reviewWorkingDirectory, "working-directory", "", "Repository directory the plan was made in, e.g. services/api or . for the root (auto-detected in Atlantis)")
 
 	// GitHub context (optional, for PR comments)
 	reviewCmd.Flags().StringVar(&githubOwner, "github-owner", "", "GitHub repository owner (for PR comments)")
@@ -155,6 +163,8 @@ type PlanUploadRequest struct {
 	GitHub     *GitHubContext         `json:"github,omitempty"`
 	Source     string                 `json:"source,omitempty"`
 	CapturedAt string                 `json:"capturedAt,omitempty"`
+	// WorkingDirectory tells Cora which repository directory feeds the workspace
+	WorkingDirectory string `json:"workingDirectory,omitempty"`
 }
 
 // GitHubContext contains GitHub PR information for posting comments
@@ -325,10 +335,11 @@ func runReview(cmd *cobra.Command, args []string) error {
 
 	// Build request payload
 	request := PlanUploadRequest{
-		Workspace:  reviewWorkspace,
-		Plan:       planJSON,
-		Source:     reviewSource,
-		CapturedAt: time.Now().UTC().Format(time.RFC3339),
+		Workspace:        reviewWorkspace,
+		Plan:             planJSON,
+		Source:           reviewSource,
+		CapturedAt:       time.Now().UTC().Format(time.RFC3339),
+		WorkingDirectory: reviewWorkingDirectory,
 	}
 
 	// Add GitHub context if all required fields are provided

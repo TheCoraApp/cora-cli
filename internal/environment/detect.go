@@ -21,6 +21,10 @@ type Environment interface {
 	// Workspace returns the auto-constructed workspace name
 	Workspace() string
 
+	// WorkingDirectory returns the repository directory Terraform ran in
+	// ("." for the root), or "" when the environment does not report it
+	WorkingDirectory() string
+
 	// Description returns a human-readable description for logging
 	Description() string
 }
@@ -130,6 +134,11 @@ func (e *AtlantisEnv) Workspace() string {
 		return e.projectName + "-" + e.workspace
 	}
 	return e.workspace
+}
+
+// WorkingDirectory returns REPO_REL_DIR, the project's directory in the repository
+func (e *AtlantisEnv) WorkingDirectory() string {
+	return e.relativeDir
 }
 
 func (e *AtlantisEnv) Description() string {
@@ -279,6 +288,12 @@ func (e *GitHubActionsEnv) Workspace() string {
 	if e.refName != "" {
 		return e.refName
 	}
+	return ""
+}
+
+// WorkingDirectory is not reported by GitHub Actions: the plan may have been
+// produced in any directory, so it has to be passed with --working-directory
+func (e *GitHubActionsEnv) WorkingDirectory() string {
 	return ""
 }
 
